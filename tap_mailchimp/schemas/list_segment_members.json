@@ -31,12 +31,6 @@
         "string"
       ]
     },
-    "merge_fields": {
-      "type": [
-        "null",
-        "object"
-      ]
-    },
     "stats": {
       "type": [
         "null",
@@ -112,12 +106,6 @@
       "type": [
         "null",
         "string"
-      ]
-    },
-    "interests": {
-      "type": [
-        "null",
-        "object"
       ]
     },
     "location": {
