@@ -10,25 +10,29 @@ from requests.exceptions import HTTPError
 
 LOGGER = singer.get_logger()
 
-MIN_RETRY_INTERVAL = 2 # 2 seconds
-MAX_RETRY_INTERVAL = 300 # 5 minutes
-MAX_RETRY_ELAPSED_TIME = 43200 # 12 hours
+MIN_RETRY_INTERVAL = 2  # 2 seconds
+MAX_RETRY_INTERVAL = 300  # 5 minutes
+MAX_RETRY_ELAPSED_TIME = 43200  # 12 hours
 
 # Break up reports_email_activity batches to iterate over chunks
 EMAIL_ACTIVITY_BATCH_SIZE = 100
 
+
 class BatchExpiredError(Exception):
     pass
+
 
 def next_sleep_interval(previous_sleep_interval):
     min_interval = previous_sleep_interval or MIN_RETRY_INTERVAL
     max_interval = previous_sleep_interval * 2 or MIN_RETRY_INTERVAL
     return min(MAX_RETRY_INTERVAL, random.randint(min_interval, max_interval))
 
+
 def write_schema(catalog, stream_name):
     stream = catalog.get_stream(stream_name)
     schema = stream.schema.to_dict()
     singer.write_schema(stream_name, schema, stream.key_properties)
+
 
 def process_records(catalog,
                     stream_name,
@@ -43,7 +47,7 @@ def process_records(catalog,
         for record in records:
             if bookmark_field:
                 if max_bookmark_field is None or \
-                   record[bookmark_field] > max_bookmark_field:
+                        record[bookmark_field] > max_bookmark_field:
                     max_bookmark_field = record[bookmark_field]
             if persist:
                 record = transformer.transform(record,
@@ -53,23 +57,28 @@ def process_records(catalog,
                 counter.increment()
         return max_bookmark_field
 
+
 def get_bookmark(state, path, default):
     dic = state
-    for key in ['bookmarks'] + path:
+    for key in ['value', 'bookmarks'] + path:
         if key in dic:
             dic = dic[key]
         else:
             return default
     return dic
 
+
+
 def nested_set(dic, path, value):
     for key in path[:-1]:
         dic = dic.setdefault(key, {})
     dic[path[-1]] = value
 
+
 def write_bookmark(state, path, value):
     nested_set(state, ['bookmarks'] + path, value)
     singer.write_state(state)
+
 
 def sync_endpoint(client,
                   catalog,
@@ -106,7 +115,6 @@ def sync_endpoint(client,
             'offset': offset,
             **static_params
         }
-
         if bookmark_query_field:
             params[bookmark_query_field] = last_datetime
 
@@ -124,7 +132,6 @@ def sync_endpoint(client,
             path,
             params=params,
             endpoint=stream_name)
-
 
         raw_records = data.get(data_key)
 
@@ -147,12 +154,14 @@ def sync_endpoint(client,
 
     return ids
 
+
 def get_dependants(endpoint_config):
     dependants = endpoint_config.get('dependants', [])
     for stream_name, child_endpoint_config in endpoint_config.get('children', {}).items():
         dependants.append(stream_name)
         dependants += get_dependants(child_endpoint_config)
     return dependants
+
 
 def sync_stream(client,
                 catalog,
@@ -206,6 +215,7 @@ def sync_stream(client,
                                 bookmark_path=bookmark_path + [_id, child_stream_name],
                                 id_path=id_path + [_id])
 
+
 def get_batch_info(client, batch_id):
     try:
         return client.get(
@@ -216,8 +226,10 @@ def get_batch_info(client, batch_id):
             raise BatchExpiredError('Batch {} expired'.format(batch_id))
         raise e
 
+
 def write_activity_batch_bookmark(state, batch_id):
     write_bookmark(state, ['reports_email_activity_last_run_id'], batch_id)
+
 
 def poll_email_activity(client, state, batch_id):
     sleep = 0
@@ -254,6 +266,7 @@ def poll_email_activity(client, state, batch_id):
                     sleep)
         time.sleep(sleep)
 
+
 def stream_email_activity(client, catalog, state, archive_url):
     stream_name = 'reports_email_activity'
 
@@ -284,7 +297,8 @@ def stream_email_activity(client, catalog, state, archive_url):
                     for i, operation in enumerate(operations):
                         campaign_id = operation['operation_id']
                         last_bookmark = state.get('bookmarks', {}).get(stream_name, {}).get(campaign_id)
-                        LOGGER.info("reports_email_activity - [batch operation %s] Processing records for campaign %s", i, campaign_id)
+                        LOGGER.info("reports_email_activity - [batch operation %s] Processing records for campaign %s",
+                                    i, campaign_id)
                         if operation['status_code'] != 200:
                             failed_campaign_ids.append(campaign_id)
                         else:
@@ -301,6 +315,7 @@ def stream_email_activity(client, catalog, state, archive_url):
                                            max_bookmark_field)
                 file = tar.next()
     return failed_campaign_ids
+
 
 def sync_email_activity(client, catalog, state, start_date, campaign_ids, batch_id=None):
     if batch_id:
@@ -352,6 +367,7 @@ def sync_email_activity(client, catalog, state, start_date, campaign_ids, batch_
 
     write_activity_batch_bookmark(state, None)
 
+
 def get_selected_streams(catalog):
     selected_streams = set()
     for stream in catalog.streams:
@@ -360,6 +376,7 @@ def get_selected_streams(catalog):
         if root_metadata and root_metadata.get('selected') is True:
             selected_streams.add(stream.tap_stream_id)
     return list(selected_streams)
+
 
 def format_selected_fields(catalog, stream_name, data_key, extra_fields=None):
     """Given a catalog with selected metadata return a comma separated string
@@ -387,7 +404,6 @@ def format_selected_fields(catalog, stream_name, data_key, extra_fields=None):
     return ",".join(formatted_field_names)
 
 
-
 def should_sync_stream(streams_to_sync, dependants, stream_name):
     selected_streams = streams_to_sync['selected_streams']
     should_persist = stream_name in selected_streams
@@ -399,6 +415,7 @@ def should_sync_stream(streams_to_sync, dependants, stream_name):
         if should_persist or set(dependants).intersection(selected_streams):
             return True, should_persist
     return False, should_persist
+
 
 def chunk_campaigns(sorted_campaigns, chunk_bookmark):
     chunk_start = chunk_bookmark * EMAIL_ACTIVITY_BATCH_SIZE
@@ -425,6 +442,7 @@ def chunk_campaigns(sorted_campaigns, chunk_bookmark):
         chunk_start = chunk_end
         chunk_end += EMAIL_ACTIVITY_BATCH_SIZE
 
+
 def write_email_activity_chunk_bookmark(state, current_bookmark, current_index, sorted_campaigns):
     # Bookmark next chunk because the current chunk will be saved in batch_id
     # Index is relative to current bookmark
@@ -433,6 +451,7 @@ def write_email_activity_chunk_bookmark(state, current_bookmark, current_index, 
         write_bookmark(state, ['reports_email_activity_next_chunk'], next_chunk)
     else:
         write_bookmark(state, ['reports_email_activity_next_chunk'], 0)
+
 
 def check_and_resume_email_activity_batch(client, catalog, state, start_date):
     batch_id = get_bookmark(state, ['reports_email_activity_last_run_id'], None)
@@ -450,17 +469,17 @@ def check_and_resume_email_activity_batch(client, catalog, state, start_date):
             return
 
         # Resume from bookmarked job_id, then if completed, issue a new batch for processing.
-        campaigns = [] # Don't need a list of campaigns if resuming
+        campaigns = []  # Don't need a list of campaigns if resuming
         sync_email_activity(client, catalog, state, start_date, campaigns, batch_id)
 
-## TODO: is current_stream being updated?
+
+# TODO: is current_stream being updated?
 
 def sync(client, catalog, state, start_date):
     streams_to_sync = {
         'selected_streams': get_selected_streams(catalog),
         'last_stream': state.get('current_stream')
     }
-
     if not streams_to_sync['selected_streams']:
         return
 
@@ -476,6 +495,10 @@ def sync(client, catalog, state, start_date):
             'children': {
                 'list_members': {
                     'path': '/lists/{}/members',
+                    'params': {
+                        'sort_field': 'last_changed',
+                        'sort_dir': 'ASC'
+                    },
                     'data_path': 'members',
                     'bookmark_query_field': 'since_last_changed',
                     'bookmark_field': 'last_changed'
@@ -483,6 +506,7 @@ def sync(client, catalog, state, start_date):
                 'list_segments': {
                     'path': '/lists/{}/segments',
                     'data_path': 'segments',
+                    'bookmark_query_field': 'since_updated_at',
                     'children': {
                         'list_segment_members': {
                             'path': '/lists/{}/segments/{}/members',
@@ -503,14 +527,11 @@ def sync(client, catalog, state, start_date):
                 'sort_dir': 'ASC'
             },
             'store_ids': True,
-            'children': {
-                'unsubscribes': {
-                    'path': '/reports/{}/unsubscribed'
-                }
-            }
+            'bookmark_query_field': 'since_create_time'
         },
         'automations': {
-            'path': '/automations'
+            'path': '/automations',
+            'bookmark_query_field': 'since_create_time'
         }
     }
 
@@ -523,10 +544,8 @@ def sync(client, catalog, state, start_date):
                     id_bag,
                     stream_name,
                     endpoint_config)
+    should_stream, _ = should_sync_stream(streams_to_sync, [], 'reports_email_activity')
 
-    should_stream, _ = should_sync_stream(streams_to_sync,
-                                          [],
-                                          'reports_email_activity')
     campaign_ids = id_bag.get('campaigns')
     if should_stream and campaign_ids:
         # Resume previous batch, if necessary
