@@ -2,6 +2,7 @@ import json
 import time
 import random
 import tarfile
+from datetime import datetime
 
 import singer
 from singer import metrics, metadata, Transformer
@@ -53,6 +54,7 @@ def process_records(catalog,
                 record = transformer.transform(record,
                                                schema,
                                                stream_metadata)
+                record['report_date'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 singer.write_record(stream_name, record)
                 counter.increment()
         return max_bookmark_field
@@ -66,7 +68,6 @@ def get_bookmark(state, path, default):
         else:
             return default
     return dic
-
 
 
 def nested_set(dic, path, value):

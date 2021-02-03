@@ -455,6 +455,10 @@
           ]
         }
       }
+    },
+    "report_date": {
+      "type": "string",
+      "format": "date-time"
     }
   }
 }
